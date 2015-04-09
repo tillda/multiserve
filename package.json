@@ -1,0 +1,19 @@
+{
+  "name": "multiserve",
+  "version": "0.2.0",
+  "dependencies": {
+    "cli-color": "*",
+    "express": "3.0.0",
+    "gulp": "^3.8.11",
+    "gulp-concat": "^2.2.0",
+    "gulp-file-include": "^0.3.0",
+    "gulp-rename": "^1.2.0",
+    "gulp-util": "^2.2.14",
+    "gulp-watch": "^0.6.4",
+    "hogan.js": "^2.0.0",
+    "jade": "*"
+  },
+  "main" : "multiserve.js" ,
+  "engines": {
+  }
+}
