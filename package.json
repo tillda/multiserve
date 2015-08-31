@@ -1,6 +1,13 @@
 {
   "name": "multiserve",
-  "version": "0.2.0",
+  "version": "0.2.1",
+  "description" : "A simple \"static+\" webserver",
+  "main" : "multiserve.js",
+  "repository" : { 
+    "type" : "git",
+    "url" : "https://github.com/tillda/multiserve"
+  },
+  "license" : "BSD-3-Clause",
   "dependencies": {
     "body-parser": "^1.13.3",
     "cli-color": "*",
@@ -20,7 +27,6 @@
     "serve-favicon": "^2.3.0"
   },
   "engines": {
-    "node": "0.10.x",
-    "npm": "1.1.x"
+    "node": "0.12.x"
   }
 }
