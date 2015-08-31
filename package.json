@@ -2,18 +2,25 @@
   "name": "multiserve",
   "version": "0.2.0",
   "dependencies": {
+    "body-parser": "^1.13.3",
     "cli-color": "*",
-    "express": "3.0.0",
-    "gulp": "^3.8.11",
-    "gulp-concat": "^2.2.0",
-    "gulp-file-include": "^0.3.0",
-    "gulp-rename": "^1.2.0",
-    "gulp-util": "^2.2.14",
-    "gulp-watch": "^0.6.4",
-    "hogan.js": "^2.0.0",
-    "jade": "*"
+    "errorhandler": "^1.4.2",
+    "express": "^4.13.3",
+    "gulp": "^3.9.0",
+    "gulp-concat": "^2.6.0",
+    "gulp-file-include": "^0.13.7",
+    "gulp-rename": "^1.2.2",
+    "gulp-util": "^3.0.6",
+    "gulp-watch": "^4.3.5",
+    "hogan.js": "^3.0.2",
+    "jade": "*",
+    "method-override": "^2.3.5",
+    "mime-types": "^2.1.5",
+    "morgan": "^1.6.1",
+    "serve-favicon": "^2.3.0"
   },
-  "main" : "multiserve.js" ,
   "engines": {
+    "node": "0.10.x",
+    "npm": "1.1.x"
   }
 }

@@ -6,193 +6,232 @@ var url = require("url");
 var fs = require("fs");
 var jade = require("jade");
 var notice = clc.blue;
+var favicon = require('serve-favicon');
+var morgan = require('morgan');
+var bodyParser = require('body-parser');
+var methodOverride = require('method-override');
+var errorhandler = require('errorhandler');
+var mime = require('mime-types');
 
-var logging = true;
+var logging = false;
 
-function absolutePath(p) {
+function absolutePathFromCwd(p) {
+    return path.join(process.cwd(), p).replace(/([^\/]*)\/\.\.\//g, "");
+}
+
+function absolutePathFromCurrentFile(p) {
     return path.join(__dirname, p).replace(/([^\/]*)\/\.\.\//g, "");
 }
 
 var servedDirectories = [];
 
 function serve(app, urlPath, fsPath) {
-    var fullFsPath = absolutePath(fsPath);
-    app.use("/" + urlPath, express.static(fullFsPath));
-    app.use(function(req, res, next){
-    	res.setHeader("Access-Control-Allow-Origin", "*");
-    	next();
- 	});    
+    var fullFsPath = absolutePathFromCwd(fsPath);
+    log("STATIC", leadingSlash(urlPath, true), fullFsPath);
+    app.use(leadingSlash(urlPath, true), express.static(fullFsPath));
     servedDirectories.push({
-    	fsPath : fullFsPath,
-    	mountPath : urlPath
+        fsPath: fullFsPath,
+        mountPath: urlPath
     });
 }
 
 function log() {
-	if (logging) {
-		console.log.apply(console, arguments);
-	}
+    if (logging) {
+        console.log.apply(console, arguments);
+    }
+}
+
+function exists(fsFilePath) {
+    var ex = fs.existsSync(fsFilePath);
+    log(ex ? "                EXISTS" : "                NOT EXIST", fsFilePath);
+    return ex;
+}
+
+function getFile(somePath, add) {
+    var fsFilePath = add ? path.join(somePath, add) : somePath;
+    var ex = fs.existsSync(fsFilePath);
+    var dir = ex ? fs.lstatSync(fsFilePath).isDirectory() : false;
+    var result = ex && !dir;
+    log(result ? "                  IS FILE" : "                  NOT FILE", fsFilePath);
+    return result ? fsFilePath : null;
 }
 
 function getExistingMarkupTemplate(fsFilePath) {
-	if (!fs.existsSync(fsFilePath)) {
-		return fsFilePath.replace(/\.html$/, ".jade");
-	} else {
-		return fsFilePath;
-	}
+    var newPath;
+
+    if (newPath = getFile(fsFilePath)) {
+        log("                ◉ FILE FOUND");
+        return newPath;
+    }
+
+    if ((endsWithSlash(fsFilePath)) && (newPath = getFile(trailingSlash(fsFilePath, false)))) {
+        log("                ◉ FILE FOUND");
+        return newPath;
+    }
+
+    if (newPath = getFile(fsFilePath, "index.html")) {
+        log("                ◉ FILE FOUND");
+        return newPath;
+    }
+
+    if (newPath = getFile(fsFilePath, "index.jade")) {
+        log("                ◉ FILE FOUND");
+        return newPath;
+    }
+
+    log("                ✘ NO FILE FOUND");
+    return null;
 }
 
 function leadingSlash(url, b) {
-	return (b ? "/" : "") + url.replace(/^\//, "");
+    return (b ? "/" : "") + url.replace(/^ *\//, "");
+}
+
+function trailingSlash(url, b) {
+    return url.replace(/\/ *$/, "") + (b ? "/" : "");
+}
+
+function endsWithSlash(url) {
+    return /\/ *$/.test(url);
 }
 
 function urlToPath(requestUrl) {
-	var urlPathSegment = url.parse(requestUrl).pathname || "";
-	for (var i=1; i<servedDirectories.length; i++) if (urlPathSegment.indexOf(servedDirectories[i].mountPath) === 0) {
-		var config = servedDirectories[i];
-		var fsFilePath = getExistingMarkupTemplate(path.join(config.fsPath+"/", urlPathSegment));
-		if ((!/\.(html|jade)$/.test(fsFilePath)) || (!fs.existsSync(fsFilePath))) {
-			return null;
-		} else {
-			return fsFilePath;
-		}
-	}
-	return null;
+    log("\n");
+    log("PROCESSING", requestUrl);
+    var urlPathSegment;
+    for (var i = 0; i < servedDirectories.length; i++) {
+        urlPathSegment = url.parse(requestUrl).pathname || "";
+        log("    TRYING MOUNT POINT ", i, ":", servedDirectories[i].mountPath, "->", servedDirectories[i].fsPath);
+        log("    ► MATCHING", urlPathSegment);
+        log("          WITH", servedDirectories[i].mountPath);
+        if (urlPathSegment.indexOf(servedDirectories[i].mountPath) === 0) {
+            log("        ✔ MATCH");
+            var config = servedDirectories[i];
+            urlPathSegment = urlPathSegment.slice(servedDirectories[i].mountPath.length);
+            log("              REAL FS PART", leadingSlash(urlPathSegment, false));
+            var fsTryPath = path.join(config.fsPath + "/", urlPathSegment);
+            log("              TRANSLATED FS PATH", fsTryPath);
+            var fsFilePath = getExistingMarkupTemplate(fsTryPath);
+            log("              FILE", fsFilePath);
+            if (fsFilePath) {
+                return fsFilePath;
+            }
+        } else {
+            log("        ✘ NOT MATCH");
+        }
+    }
+    return null;
 }
 
-function renderFile(fsFilePath, req, res, next, options) {
+function renderFile(fsFilePath, res, next) {
+    var ext = path.extname(fsFilePath);
+    var data;
+    var output;
+    switch (ext) {
+        case ".html":
+            res.setHeader("Content-Type", "text/html");
+            data = fs.readFileSync(fsFilePath);
+            output = render(data, path.dirname(fsFilePath));
+            respond(output);
+            break;
+        case ".jade":
+            res.setHeader("Content-Type", "text/html");
+            jade.renderFile(fsFilePath, renderData, function (err, html) {
+                if (err) {
+                    throw err;
+                }
+                respond(html);
+            });
+            break;
+    }
 
-	var ext = path.extname(fsFilePath);
-	var data;
+    function render(data, dir) {
+        return data.toString().replace(/\{\{>([^\}]*)\}\}/g, function (match, p) {
+            var includeFile = path.join(dir, p.trim());
+            return "<!-- @@ {source:'" + includeFile + "'} -->" + render(fs.readFileSync(includeFile), path.dirname(includeFile));
+        });
+    }
 
-	res.setHeader("Content-Type", "text/html");
-	res.setHeader("Access-Control-Allow-Origin", "*");
-	res.setHeader("Content-Disposition", "inline");
+    function respond(data) {
+        res.send(data);
+    }
 
-	var output;
-	switch (ext) {
-		case ".html":
-				data = fs.readFileSync(fsFilePath);
-				output = render(data, path.dirname(fsFilePath));
-				respond(output);
-				break;
-		case ".jade":
-				jade.renderFile(fsFilePath, renderData, function (err, html) {
-                    if (err) {
-                        throw err;
-                    }
-                    respond(html);
-				});
-				break;
-		default :
-				return next();
-				throw new Error("Can't render " + fsFilePath);
-	}
-
-	function render(data, dir) {
-		return data.toString().replace(/\{\{>([^\}]*)\}\}/g, function(match, p) {
-			var includeFile = path.join(dir, p.trim());
-			return "<!-- @@ {source:'" + includeFile+ "'} -->" + render(fs.readFileSync(includeFile), path.dirname(includeFile));
-		});
-	}
-
-	function respond(data) {
-		res.send(data);
-	}
-
+    return next();
 }
 
 var app;
 
-function trySlashVariants(urlPath) {
-	return urlToPath(leadingSlash(urlPath, true)) || urlToPath(leadingSlash(urlPath, false));
+function resolvePath(urlPath) {
+    return urlToPath(leadingSlash(urlPath, true));
 }
 
 function startWebServer(port, isRestart) {
 
-	app = express();
+    app = express();
 
-	app.configure(function(){
+    app.set('port', port || process.env.PORT);
+    app.use(favicon(absolutePathFromCurrentFile("favicon.ico")));
 
-	    app.set('port', port || process.env.PORT);
+    app.use(function (req, res, next) {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        next();
+    });
 
-	    app.use(express.favicon());
-	    app.use(express.logger('dev'));
-	    app.use(express.bodyParser());
-	    app.use(express.methodOverride());
+    app.use(function (req, res, next) {
+        var p = resolvePath(req.url);
+        if (p) {
+            renderFile(p, res, next);
+        } else {
+            return next();
+        }
+    });
 
-		app.use(function(req, res, next) {
-			var p = trySlashVariants(req.url);
-			if (p) {
-				renderFile(p, req, res, next, {});
-			} else {
-				return next();
-			}
-		});
 
-		app.use(function(req, res, next) {
-			var parsedUrl = url.parse(req.url);
-			var urlPathSegment = parsedUrl.pathname.replace(/\/$/, "") + "/";
-			var indexUrl = url.resolve(urlPathSegment, "index.html");
-			var p = trySlashVariants(indexUrl);
-			if (p) {
-				if (!/\/$/.test(req.url.trim())) {
-					res.statusCode = 302;
-					res.setHeader('Location', req.url + "/" );
-				}
-				renderFile(p, req, res, next, {})
-			} else {
-				return next();
-			}
-		});
+    app.use(errorhandler());
+    app.locals.pretty = true;
 
-	});
-
-	app.configure('development', function(){
-	    app.use(express.errorHandler());
-	    app.locals.pretty = true;
-	});
-
-	var server = http.createServer(app);
-	server.listen(app.get('port'), function(){
-	    if (!isRestart) {
+    var server = http.createServer(app);
+    server.listen(app.get('port'), function () {
+        if (!isRestart) {
             console.log("Dev server started on port: " + app.get('port'));
         }
-	});
+    });
 
-	return server;
+    app.use(morgan('dev'));
+
+    return server;
 
 }
 
 function mountDirectories(app, configs) {
-	servedDirectories = [];
-	configs.forEach(function(config) {
-		serve(app, leadingSlash(config.urlPath, false), config.fsPath);
-	});
+    servedDirectories = [];
+    configs.forEach(function (config) {
+        serve(app, leadingSlash(config.urlPath, true), config.fsPath);
+    });
 }
 
 function logRouting(configs) {
-	configs.forEach(function(config) {
-		console.log(notice(leadingSlash(config.urlPath, true)) + " ━► " + config.fsPath);
-	});
+    configs.forEach(function (config) {
+        console.log(notice(leadingSlash(config.urlPath, true)) + " ━► " + absolutePathFromCwd(config.fsPath));
+    });
 }
 
 var renderData = {};
 
 module.exports = {
-	server : null,
-	running : false,
-	start : function(config, isRestart) {
-		this.server = startWebServer(config.port, isRestart);
-		renderData.config = config;
-		mountDirectories(app, config.routing);
-		if (!isRestart) {
+    server: null,
+    running: false,
+    start: function (config, isRestart) {
+        this.server = startWebServer(config.port, isRestart);
+        renderData.config = config;
+        mountDirectories(app, config.routing);
+        if (!isRestart) {
             logRouting(config.routing);
         }
-		this.running = true;
-	},
-	stop : function() {
-		this.server.close();
-		this.running = false;
-	}
+        this.running = true;
+    },
+    stop: function () {
+        this.server.close();
+        this.running = false;
+    }
 };
